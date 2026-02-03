@@ -121,7 +121,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def stream_azure_response_generic(messages, deployment_name, max_tokens=4000):
+def stream_azure_response_generic(messages, deployment_name, max_tokens=4000, token_tracker=None):
     """Generic stream wrapper for all methods"""
     try:
         response = client.chat.completions.create(
@@ -129,19 +129,40 @@ def stream_azure_response_generic(messages, deployment_name, max_tokens=4000):
             messages=messages,
             stream=True,
             temperature=0.8,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            stream_options={"include_usage": True}
         )
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
+            
+            # Capture token usage if available (usually in the last chunk)
+            if token_tracker is not None and hasattr(chunk, 'usage') and chunk.usage:
+                token_tracker['prompt'] += chunk.usage.prompt_tokens
+                token_tracker['completion'] += chunk.usage.completion_tokens
+                token_tracker['total'] += chunk.usage.total_tokens
+                
     except Exception as e:
         logger.error(f"❌ LLM Error: {str(e)}")
         st.error(f"Generation failed: {str(e)}")
         raise e
 
-def display_execution_time(start_time):
+def display_execution_time(start_time, token_tracker=None):
     end_time = time.time()
     execution_time = end_time - start_time
+    
+    tokens_html = ""
+    if token_tracker:
+        tokens_html = f"""
+        <div style="margin-top: 15px; font-size: 0.9rem; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-around; width: 100%;">
+                <span>📥 Input: {token_tracker['prompt']}</span>
+                <span>📤 Output: {token_tracker['completion']}</span>
+                <span>∑  Total: {token_tracker['total']}</span>
+            </div>
+        </div>
+        """
+        
     st.markdown(f"""
     <div style="
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
@@ -149,14 +170,14 @@ def display_execution_time(start_time):
         border-radius: 10px;
         color: black;
         text-align: center;
-        font-weight: bold;
-        font-size: 1.5rem;
+        width: 100%;
         margin-top: 30px;
         margin-bottom: 20px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     ">
-        ✅ Generation Complete!<br>
-        <span style="font-size: 1rem; font-weight: normal;">Time Taken: {execution_time:.2f} seconds</span>
+        <div style="font-weight: bold; font-size: 1.5rem;">✅ Generation Complete!</div>
+        <div style="font-size: 1rem; margin-top: 5px;">Time Taken: {execution_time:.2f} seconds</div>
+        {tokens_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -238,6 +259,7 @@ def render_method1():
 
         # Start Timer
         start_time = time.time()
+        token_tracker = {'prompt': 0, 'completion': 0, 'total': 0}
 
         # 1. Outline
         st.subheader("Phase 1: Master Outline")
@@ -247,7 +269,7 @@ def render_method1():
             return stream_azure_response_generic([
                 {"role": "system", "content": "You are an expert screenwriter."},
                 {"role": "user", "content": f"Create a {num_pages}-page script outline for: {user_input}. Format as numbered list of scenes with summaries."}
-            ], deployment)
+            ], deployment, token_tracker=token_tracker)
             
         outline_text = ""
         with outline_ph.container():
@@ -269,13 +291,13 @@ def render_method1():
                 return stream_azure_response_generic([
                     {"role": "system", "content": "Write a screenplay scene. Format: SCENE HEADING, ACTION, CHARACTER, DIALOGUE."},
                     {"role": "user", "content": f"Write this scene based on outline:\n{scene}\n\nContext: {user_input}"}
-                ], deployment)
+                ], deployment, token_tracker=token_tracker)
             
             scene_content = st.write_stream(gen_scene())
             full_script += f"\n\n{scene_content}\n\n"
             st.markdown("---")
             
-        display_execution_time(start_time)
+        display_execution_time(start_time, token_tracker)
         
         st.download_button("Download Script", full_script, "script_sequential.txt")
 
@@ -303,6 +325,7 @@ def render_method2():
 
         # Start Timer
         start_time = time.time()
+        token_tracker = {'prompt': 0, 'completion': 0, 'total': 0}
 
         # Phase 1: Skeleton
         st.subheader("Phase 1: generating Skeleton")
@@ -313,7 +336,7 @@ def render_method2():
             return stream_azure_response_generic([
                 {"role": "system", "content": "Create concise scene summaries."},
                 {"role": "user", "content": f"Create {num_scenes} scene summaries for: {user_input}"}
-            ], deployment)
+            ], deployment, token_tracker=token_tracker)
             
         skeleton_text = ""
         with skeleton_ph.container():
@@ -340,14 +363,14 @@ def render_method2():
                 return stream_azure_response_generic([
                     {"role": "system", "content": "Write full screenplay scene."},
                     {"role": "user", "content": f"Expand this summary:\n{summary}\n\nContext:\n{context}"}
-                ], deployment)
+                ], deployment, token_tracker=token_tracker)
             
             scene_text = st.write_stream(gen_expansion())
             previous_scenes.append(scene_text)
             full_script += f"\n\n{scene_text}\n\n"
             st.markdown("---")
 
-        display_execution_time(start_time)
+        display_execution_time(start_time, token_tracker)
 
         st.download_button("Download Script", full_script, "script_iterative.txt")
 
@@ -375,6 +398,7 @@ def render_method3():
 
         # Start Timer
         start_time = time.time()
+        token_tracker = {'prompt': 0, 'completion': 0, 'total': 0}
 
         # Calc pages
         if "3-Act" in act_struct: pages = [int(num_pages*0.25), int(num_pages*0.5), int(num_pages*0.25)]
@@ -392,7 +416,7 @@ def render_method3():
                 return stream_azure_response_generic([
                     {"role": "system", "content": "Create act outline."},
                     {"role": "user", "content": f"Outline Act {act_idx} ({act_len} pages) for: {user_input}"}
-                ], deployment)
+                ], deployment, token_tracker=token_tracker)
             act_outline = st.write_stream(gen_act_out())
             
             # Chunks
@@ -405,14 +429,14 @@ def render_method3():
                     return stream_azure_response_generic([
                         {"role": "system", "content": "Write screenplay chunk."},
                         {"role": "user", "content": f"Write {chunk_size} pages for Act {act_idx}, Chunk {chunk_idx+1}.\nOutline: {act_outline}\nPrev Summary: {last_summary}"}
-                    ], deployment)
+                    ], deployment, token_tracker=token_tracker)
                 
                 chunk_content = st.write_stream(gen_chunk())
                 full_script += f"\n\n{chunk_content}\n\n"
                 last_summary = chunk_content[-500:] # fast summary
                 st.markdown("---")
                 
-        display_execution_time(start_time)
+        display_execution_time(start_time, token_tracker)
 
         st.download_button("Download Script", full_script, "script_chunks.txt")
 
