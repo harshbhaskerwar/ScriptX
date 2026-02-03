@@ -205,11 +205,9 @@ def render_method1():
 
     user_input = st.text_area("Script Description", placeholder="Enter your story concept...", height=100, key="m1_input")
     
-    c1, c2 = st.columns(2)
-    with c1:
-        num_pages = st.number_input("Target Pages", 10, 200, 140, key="m1_pages")
-    with c2:
-        deployment = st.text_input("Deployment", value=os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini"), key="m1_dep")
+    deployment = os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini")
+    
+    num_pages = st.number_input("Target Pages", 10, 200, 140, key="m1_pages")
 
     if st.button("Generate Script (Sequential)", key="m1_btn"):
         if not user_input:
@@ -263,13 +261,13 @@ def render_method2():
 
     user_input = st.text_area("Script Description", placeholder="Enter your story concept...", height=100, key="m2_input")
     
+    deployment = os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini")
+    
     col1, col2 = st.columns(2)
     with col1:
         num_pages = st.number_input("Target Pages", 10, 200, 140, key="m2_pages")
     with col2:
         context_window = st.number_input("Rolling Context (scenes)", 1, 5, 3, key="m2_window")
-        
-    deployment = st.text_input("Deployment", value=os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini"), key="m2_dep")
 
     if st.button("Generate Script (Iterative)", key="m2_btn"):
         if not user_input:
@@ -330,6 +328,8 @@ def render_method3():
 
     user_input = st.text_area("Script Description", placeholder="Story concept...", height=100, key="m3_input")
     
+    deployment = os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini")
+
     c1, c2, c3 = st.columns(3)
     with c1:
         num_pages = st.number_input("Total Pages", 30, 200, 140, key="m3_pages")
@@ -337,8 +337,6 @@ def render_method3():
         chunk_size = st.number_input("Chunk Size", 5, 20, 10, key="m3_chunk")
     with c3:
         act_struct = st.selectbox("Structure", ["3-Act (25/50/25)", "4-Act (25/25/25/25)", "5-Act (20/20/20/20/20)"], key="m3_struct")
-
-    deployment = st.text_input("Deployment", value=os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini"), key="m3_dep")
 
     if st.button("Generate Script (Chunks)", key="m3_btn"):
         if not user_input: return
