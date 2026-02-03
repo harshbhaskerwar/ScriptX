@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 import logging
 import sys
+import time
 
 # -----------------------------------------------------------------------------
 # 1. PAGE CONFIGURATION & STYLING
@@ -214,6 +215,9 @@ def render_method1():
             st.error("Please enter a description.")
             return
 
+        # Start Timer
+        start_time = time.time()
+
         # 1. Outline
         st.subheader("Phase 1: Master Outline")
         outline_ph = st.empty()
@@ -250,6 +254,11 @@ def render_method1():
             full_script += f"\n\n{scene_content}\n\n"
             st.markdown("---")
             
+        # End Timer
+        end_time = time.time()
+        execution_time = end_time - start_time
+        st.success(f"Generation completed in {execution_time:.2f} seconds")
+        
         st.download_button("Download Script", full_script, "script_sequential.txt")
 
 # -----------------------------------------------------------------------------
@@ -273,6 +282,9 @@ def render_method2():
         if not user_input:
             st.error("Missing description.")
             return
+
+        # Start Timer
+        start_time = time.time()
 
         # Phase 1: Skeleton
         st.subheader("Phase 1: generating Skeleton")
@@ -317,6 +329,11 @@ def render_method2():
             full_script += f"\n\n{scene_text}\n\n"
             st.markdown("---")
 
+        # End Timer
+        end_time = time.time()
+        execution_time = end_time - start_time
+        st.success(f"Generation completed in {execution_time:.2f} seconds")
+
         st.download_button("Download Script", full_script, "script_iterative.txt")
 
 # -----------------------------------------------------------------------------
@@ -340,6 +357,9 @@ def render_method3():
 
     if st.button("Generate Script (Chunks)", key="m3_btn"):
         if not user_input: return
+
+        # Start Timer
+        start_time = time.time()
 
         # Calc pages
         if "3-Act" in act_struct: pages = [int(num_pages*0.25), int(num_pages*0.5), int(num_pages*0.25)]
@@ -377,6 +397,11 @@ def render_method3():
                 last_summary = chunk_content[-500:] # fast summary
                 st.markdown("---")
                 
+        # End Timer
+        end_time = time.time()
+        execution_time = end_time - start_time
+        st.success(f"Generation completed in {execution_time:.2f} seconds")
+
         st.download_button("Download Script", full_script, "script_chunks.txt")
 
 # -----------------------------------------------------------------------------
