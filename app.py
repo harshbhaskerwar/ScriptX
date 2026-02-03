@@ -139,6 +139,27 @@ def stream_azure_response_generic(messages, deployment_name, max_tokens=4000):
         st.error(f"Generation failed: {str(e)}")
         raise e
 
+def display_execution_time(start_time):
+    end_time = time.time()
+    execution_time = end_time - start_time
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
+        padding: 20px;
+        border-radius: 10px;
+        color: black;
+        text-align: center;
+        font-weight: bold;
+        font-size: 1.5rem;
+        margin-top: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    ">
+        ✅ Generation Complete!<br>
+        <span style="font-size: 1rem; font-weight: normal;">Time Taken: {execution_time:.2f} seconds</span>
+    </div>
+    """, unsafe_allow_html=True)
+
 # -----------------------------------------------------------------------------
 # 3. PAGE LOGIC: HOME
 # -----------------------------------------------------------------------------
@@ -254,10 +275,7 @@ def render_method1():
             full_script += f"\n\n{scene_content}\n\n"
             st.markdown("---")
             
-        # End Timer
-        end_time = time.time()
-        execution_time = end_time - start_time
-        st.success(f"Generation completed in {execution_time:.2f} seconds")
+        display_execution_time(start_time)
         
         st.download_button("Download Script", full_script, "script_sequential.txt")
 
@@ -329,10 +347,7 @@ def render_method2():
             full_script += f"\n\n{scene_text}\n\n"
             st.markdown("---")
 
-        # End Timer
-        end_time = time.time()
-        execution_time = end_time - start_time
-        st.success(f"Generation completed in {execution_time:.2f} seconds")
+        display_execution_time(start_time)
 
         st.download_button("Download Script", full_script, "script_iterative.txt")
 
@@ -397,10 +412,7 @@ def render_method3():
                 last_summary = chunk_content[-500:] # fast summary
                 st.markdown("---")
                 
-        # End Timer
-        end_time = time.time()
-        execution_time = end_time - start_time
-        st.success(f"Generation completed in {execution_time:.2f} seconds")
+        display_execution_time(start_time)
 
         st.download_button("Download Script", full_script, "script_chunks.txt")
 
