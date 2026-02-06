@@ -100,6 +100,76 @@ st.markdown("""
     .nav-button {
         width: 100%;
     }
+
+    /* ChatBot Sidebar Styling */
+    .chat-sidebar {
+        background: rgba(15, 15, 15, 0.8) !important;
+        backdrop-filter: blur(20px);
+        border-left: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 20px;
+        height: 100vh;
+        overflow-y: auto;
+    }
+
+    .chat-message {
+        padding: 12px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        max-width: 85%;
+    }
+
+    .user-message {
+        background: rgba(0, 201, 255, 0.2);
+        color: white;
+        align-self: flex-end;
+        margin-left: auto;
+        border: 1px solid rgba(0, 201, 255, 0.3);
+    }
+
+    .ai-message {
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+        align-self: flex-start;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .script-viewer {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 40px;
+        border-radius: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        color: #e0e0e0;
+        font-family: 'Courier New', Courier, monospace;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        min-height: 600px;
+    }
+
+    .diff-added {
+        background-color: rgba(40, 167, 69, 0.2) !important;
+        border-left: 4px solid #28a745;
+        display: block;
+        width: 100%;
+    }
+
+    .diff-removed {
+        background-color: rgba(220, 53, 69, 0.2) !important;
+        border-left: 4px solid #dc3545;
+        text-decoration: line-through;
+        display: block;
+        width: 100%;
+    }
+
+    .typing-animation::after {
+        content: '|';
+        animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -153,6 +223,7 @@ def display_execution_time(start_time, token_tracker=None):
     
     tokens_html = ""
     if token_tracker:
+        # Use a single line or stripped string to avoid Markdown code block indentation issues
         tokens_html = f"""
         <div style="margin-top: 15px; font-size: 0.9rem; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
             <div style="display: flex; justify-content: space-around; width: 100%;">
@@ -161,7 +232,7 @@ def display_execution_time(start_time, token_tracker=None):
                 <span>∑  Total: {token_tracker['total']}</span>
             </div>
         </div>
-        """
+        """.strip()
         
     st.markdown(f"""
     <div style="
@@ -180,6 +251,151 @@ def display_execution_time(start_time, token_tracker=None):
         {tokens_html}
     </div>
     """, unsafe_allow_html=True)
+
+import difflib
+import re
+
+# -----------------------------------------------------------------------------
+# 2.5 EDIT & CHAT FUNCTIONALITY
+# -----------------------------------------------------------------------------
+
+def get_diff_html(old_text, new_text):
+    """Generates an HTML diff between two strings"""
+    if not old_text:
+        return f'<div class="diff-added">{new_text}</div>'
+    
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    
+    diff = difflib.ndiff(old_lines, new_lines)
+    html_output = []
+    
+    for line in diff:
+        if line.startswith('+ '):
+            html_output.append(f'<div class="diff-added">{line[2:]}</div>')
+        elif line.startswith('- '):
+            html_output.append(f'<div class="diff-removed">{line[2:]}</div>')
+        elif line.startswith('  '):
+            html_output.append(f'<div>{line[2:]}</div>')
+            
+    return "".join(html_output)
+
+def handle_ai_interaction(prompt, current_script, deployment_name):
+    """Handles both chat and script editing with high-precision instructions"""
+    messages = [
+        {"role": "system", "content": """You are ScriptX, a professional Screenplay Architect.
+        
+        TASKS:
+        1. **Chat**: Answer questions and analyze the script.
+        2. **Edit**: Modify the script based on EXACT user instructions.
+        
+        CRITICAL EDITING RULES:
+        - If the user asks to change a specific value (e.g., "Change 2027 to 2026"), you MUST ensure that EVERY instance is updated. 
+        - Always return the FULL script, never snippets.
+        - Wrap the COMPLETE updated script inside <SCRIPT> and </SCRIPT> markers.
+        - If the user's request is a question, do NOT use the markers.
+        
+        FORMATTING:
+        - Use standard screenplay format.
+        - Start with TITLE: and end with FADE OUT or THE END."""},
+        {"role": "user", "content": f"CURRENT SCRIPT:\n\n{current_script}\n\nUSER REQUEST: {prompt}\n\nIf you are editing, please double-check that you applied the changes correctly before responding."}
+    ]
+    
+    return stream_azure_response_generic(messages, deployment_name)
+
+def render_script_editor(script_key, chat_key):
+    """Renders the split-screen editor UI with robust script detection and streaming chat"""
+    deployment = os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini")
+    
+    diff_view_key = f"{script_key}_diff_view"
+    if diff_view_key not in st.session_state:
+        st.session_state[diff_view_key] = None
+
+    col_left, col_right = st.columns([0.65, 0.35])
+    
+    with col_left:
+        st.markdown(f"### 📄 Script Preview")
+        script_area = st.empty()
+        
+        if st.session_state[diff_view_key]:
+            display_content = st.session_state[diff_view_key]
+        else:
+            display_content = f'<div class="script-viewer">{st.session_state[script_key]}</div>'
+        
+        script_area.markdown(display_content, unsafe_allow_html=True)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.session_state[diff_view_key]:
+                if st.button("✅ Accept Changes", key=f"clear_{script_key}", use_container_width=True):
+                    st.session_state[diff_view_key] = None
+                    st.rerun()
+        with c2:
+            st.download_button(
+                label="📥 Download Script",
+                data=st.session_state[script_key],
+                file_name=f"script_{script_key}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+
+    with col_right:
+        st.markdown("### 🤖 ScriptX Assistant")
+        
+        # Unified Chat Container
+        with st.container(height=600, border=True):
+            # Messages area
+            for msg in st.session_state[chat_key]:
+                role_class = "user-message" if msg["role"] == "user" else "ai-message"
+                st.markdown(f'<div class="chat-message {role_class}">{msg["content"]}</div>', unsafe_allow_html=True)
+            
+            # AI Processing Placeholder (appears inside the box)
+            is_processing = st.session_state[chat_key] and st.session_state[chat_key][-1]["role"] == "user"
+            
+            if is_processing:
+                last_prompt = st.session_state[chat_key][-1]["content"]
+                chat_msg_placeholder = st.empty()
+                with st.spinner("ScriptX is refining..."):
+                    response_gen = handle_ai_interaction(last_prompt, st.session_state[script_key], deployment)
+                    
+                    full_response = ""
+                    for chunk in response_gen:
+                        full_response += chunk
+                        visible_chat = re.sub(r'<SCRIPT>.*', '\n\n*(Updating script...)*', full_response, flags=re.DOTALL | re.IGNORECASE)
+                        visible_chat = re.sub(r'```.*', '\n\n*(Processing code...)*', visible_chat, flags=re.DOTALL | re.IGNORECASE)
+                        chat_msg_placeholder.markdown(f'<div class="chat-message ai-message">{visible_chat}</div>', unsafe_allow_html=True)
+                    
+                    new_script = None
+                    script_match = re.search(r'<SCRIPT>(.*?)</SCRIPT>', full_response, re.DOTALL | re.IGNORECASE)
+                    if script_match:
+                        new_script = script_match.group(1).strip()
+                        final_chat = full_response.replace(script_match.group(0), "").strip()
+                    else:
+                        code_match = re.search(r'```(?:python|markdown|text)?\n(.*?)\n```', full_response, re.DOTALL | re.IGNORECASE)
+                        if code_match:
+                            new_script = code_match.group(1).strip()
+                            final_chat = full_response.replace(code_match.group(0), "").strip()
+                        else:
+                            if "TITLE:" in full_response and len(full_response) > 500:
+                                parts = re.split(r'TITLE:', full_response, maxsplit=1, flags=re.IGNORECASE)
+                                if len(parts) > 1:
+                                    final_chat = parts[0].strip()
+                                    new_script = "TITLE:" + parts[1].strip()
+                            else:
+                                final_chat = full_response.strip()
+                    
+                    if new_script:
+                        diff_raw = get_diff_html(st.session_state[script_key], new_script)
+                        st.session_state[diff_view_key] = f'<div class="script-viewer">{diff_raw}</div>'
+                        st.session_state[script_key] = new_script
+                    
+                    st.session_state[chat_key].append({"role": "assistant", "content": final_chat})
+                    st.rerun()
+
+            # Chat Input inside the same container
+            if prompt := st.chat_input("Ask a question or request an edit...", key=f"input_{script_key}"):
+                st.session_state[chat_key].append({"role": "user", "content": prompt})
+                st.rerun()
 
 # -----------------------------------------------------------------------------
 # 3. PAGE LOGIC: HOME
@@ -246,6 +462,16 @@ def render_method1():
     st.title("📝 Method 1: Hierarchical + Sequential")
     st.markdown("**Overview**: Generates a master outline, then executes scene-by-scene based on that blueprint.")
 
+    # Check if script already exists
+    if st.session_state.m1_script:
+        if st.button("🔄 Generate New Script", key="m1_reset"):
+            st.session_state.m1_script = ""
+            st.session_state.m1_chat_history = []
+            st.rerun()
+        
+        render_script_editor("m1_script", "m1_chat_history")
+        return
+
     user_input = st.text_area("Script Description", placeholder="Enter your story concept...", height=100, key="m1_input")
     
     deployment = os.getenv("AZURE_LLM_DEPLOYMENT", "gpt-4o-mini")
@@ -280,7 +506,7 @@ def render_method1():
         scenes = [line.strip() for line in outline_text.split('\n') if line.strip() and (line[0].isdigit() or line.startswith('-'))]
         if not scenes: scenes = outline_text.split('\n\n')
         
-        full_script = ""
+        full_script = f"TITLE: {user_input[:50]}...\n\nOUTLINE:\n{outline_text}\n\nMODALITIES: SEQUENTIAL\n\n"
         progress = st.progress(0)
         
         for i, scene in enumerate(scenes[:min(len(scenes), num_pages // 2)]):
@@ -297,9 +523,11 @@ def render_method1():
             full_script += f"\n\n{scene_content}\n\n"
             st.markdown("---")
             
-        display_execution_time(start_time, token_tracker)
+        # Save to session state
+        st.session_state.m1_script = full_script
         
-        st.download_button("Download Script", full_script, "script_sequential.txt")
+        display_execution_time(start_time, token_tracker)
+        st.rerun()
 
 # -----------------------------------------------------------------------------
 # 5. PAGE LOGIC: METHOD 2 (Iterative)
@@ -307,6 +535,16 @@ def render_method1():
 def render_method2():
     st.title("📝 Method 2: Iterative Expansion")
     st.markdown("**Overview**: Builds progressively, passing recent scene content as rolling memory.")
+
+    # Check if script already exists
+    if st.session_state.m2_script:
+        if st.button("🔄 Generate New Script", key="m2_reset"):
+            st.session_state.m2_script = ""
+            st.session_state.m2_chat_history = []
+            st.rerun()
+        
+        render_script_editor("m2_script", "m2_chat_history")
+        return
 
     user_input = st.text_area("Script Description", placeholder="Enter your story concept...", height=100, key="m2_input")
     
@@ -348,7 +586,7 @@ def render_method2():
 
         # Phase 2: Expansion
         st.subheader("Phase 2: Expanding Scenes")
-        full_script = ""
+        full_script = f"TITLE: {user_input[:50]}...\n\nSKELETON:\n{skeleton_text}\n\nMODALITIES: ITERATIVE\n\n"
         previous_scenes = []
         progress = st.progress(0)
         
@@ -370,9 +608,9 @@ def render_method2():
             full_script += f"\n\n{scene_text}\n\n"
             st.markdown("---")
 
+        st.session_state.m2_script = full_script
         display_execution_time(start_time, token_tracker)
-
-        st.download_button("Download Script", full_script, "script_iterative.txt")
+        st.rerun()
 
 # -----------------------------------------------------------------------------
 # 6. PAGE LOGIC: METHOD 3 (Chunk-Based)
@@ -380,6 +618,16 @@ def render_method2():
 def render_method3():
     st.title("📝 Method 3: Chunk-Based Acts")
     st.markdown("**Overview**: Divides into Acts, then Chunks. Best for structure.")
+
+    # Check if script already exists
+    if st.session_state.m3_script:
+        if st.button("🔄 Generate New Script", key="m3_reset"):
+            st.session_state.m3_script = ""
+            st.session_state.m3_chat_history = []
+            st.rerun()
+        
+        render_script_editor("m3_script", "m3_chat_history")
+        return
 
     user_input = st.text_area("Script Description", placeholder="Story concept...", height=100, key="m3_input")
     
@@ -405,7 +653,7 @@ def render_method3():
         elif "4-Act" in act_struct: pages = [num_pages//4]*4
         else: pages = [num_pages//5]*5
         
-        full_script = ""
+        full_script = f"TITLE: {user_input[:50]}...\n\nSTRUCTURE: {act_struct}\n\nMODALITIES: CHUNK-BASED\n\n"
         
         for act_idx, act_len in enumerate(pages, 1):
             st.header(f"Act {act_idx} ({act_len} pages)")
@@ -436,9 +684,9 @@ def render_method3():
                 last_summary = chunk_content[-500:] # fast summary
                 st.markdown("---")
                 
+        st.session_state.m3_script = full_script
         display_execution_time(start_time, token_tracker)
-
-        st.download_button("Download Script", full_script, "script_chunks.txt")
+        st.rerun()
 
 # -----------------------------------------------------------------------------
 # 7. MAIN NAVIGATION ROUTER
@@ -447,6 +695,15 @@ def render_method3():
 # Initialize Session State
 if 'page' not in st.session_state:
     st.session_state.page = 'home'
+
+# Initialize Script and Chat States
+for i in range(1, 4):
+    script_key = f"m{i}_script"
+    chat_key = f"m{i}_chat_history"
+    if script_key not in st.session_state:
+        st.session_state[script_key] = ""
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = []
 
 # Helper to change page
 def set_page(p):
